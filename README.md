@@ -13,6 +13,8 @@ blescan      - BLE scan
 
 blespam      - BLE spam attack (5 sec)
 
+sourapple    - Sour Apple attack (5 sec, fixed payload)
+
 led          - Toggle debug LED flashing
 
 portal       - Activate captive portal
